@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from models import *
 
@@ -12,7 +13,9 @@ def map_directory(dir_path: Path) -> Directory:
             if item.is_dir():
                 curr_dir.dirs.append(recurse(item))
             elif item.is_file():
-                curr_dir.files.append(File(item))
+                curr_file = File(item)
+                load_file(curr_file)
+                curr_dir.files.append(curr_file)
             else:
                 print(f"Unknown type of directory item (NOT FILE, NOT DIR): {item}")
         return curr_dir
@@ -29,3 +32,11 @@ def dir_printer(dir: Directory, depth: int = 0) -> None:
         print(f"{indentation}┣━{file.name}")
     for child_dir in dir.dirs:
         dir_printer(child_dir, depth=depth + 1)
+
+
+def load_file(file: File) -> None:
+    if not os.access(file.fullpath, os.R_OK):
+        raise PermissionError(f"File is not readable: {file.fullpath}")
+
+    with open(file.fullpath, 'r', encoding='utf-8') as fin:
+        file.lines = [line.removesuffix('\n') for line in fin]

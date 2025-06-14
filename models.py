@@ -6,11 +6,13 @@ import debug_tools
 
 
 class File:
+    lines: List[str]
+
     def __init__(self, fullpath: Path):
         if not fullpath.is_file():
             raise ValueError(attach_context(f"Fullpath: {fullpath} does not correspond to a file"))
         self.fullpath = fullpath  # Path relative to Project's root DIR
-        self.content: List[str]  # Lines of file
+        self.lines = []
 
     @property
     def name(self) -> str:
@@ -19,12 +21,13 @@ class File:
 
 class Directory:
     files: List['File']
-    dirs : List['Directory']
+    dirs: List['Directory']
+
     def __init__(self, fullpath: Path):
         if not fullpath.is_dir():
             raise ValueError(attach_context(f"Fullpath: {fullpath} does not correspond to a directory"))
         self.fullpath = fullpath  # Path relative to Project's root DIR
-        self.files =  []
+        self.files = []
         self.dirs = []
 
     @property
