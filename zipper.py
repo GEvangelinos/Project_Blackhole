@@ -1,15 +1,32 @@
 import random
 from typing import TextIO, List
-from models import Directory, File
+from models import Directory, File, CppFunctionSignatures, LOADER_FUNC_PREFIX
 
-_delimiters_count: int = 0
+_file_count: int = 0
+_dir_count: int = 0
 
 
-def get_delimiter() -> str:
-    global _delimiters_count
-    result = f"CPP{_delimiters_count}"
-    _delimiters_count += 1
+def gen_file_id() -> str:
+    global _file_count
+    result = f"file_{_file_count}"
+    _file_count += 1
     return result
+
+
+def gen_dir_id() -> str:
+    global _dir_count
+    result = f"dir_{_dir_count}"
+    _dir_count += 1
+    return result
+
+
+def gen_rstr_delimiter(curr_file: File) -> str:
+    file_text = '\n'.join(line for line in curr_file.lines)
+    while True:
+        suffix = format(random.getrandbits(32), 'x')
+        result = f"D_{suffix}"
+        if result not in file_text:
+            return result
 
 
 def open_output_file(output_file_name: str) -> TextIO:
@@ -33,14 +50,25 @@ def generate_raw_string_identifier(file: File) -> str:
 
 
 def generate_all(root_dir: Directory, fout: TextIO):
-    generate_prologue(fout)
-    generate_content(root_dir, fout)
+    fout.write(generate_prologue())
+    fout.write(generate_directory_creation_code(root_dir))
+    fout.write(generate_file_creation_code(root_dir))
+    fout.write(generate_directory_binding_code(root_dir))
+    fout.write(generate_file_binding_code(root_dir))
+    fout.write(generate_all_file_loader_declarations(root_dir))
+    fout.write(generate_main(root_dir))
+    fout.write(generate_cpp_reconstructor(root_dir))
+    fout.write(generate_all_loader_definition_code(root_dir))
 
 
-def generate_prologue(fout: TextIO) -> None:
-    fout.write("""\
+def generate_prologue() -> str:
+    return ("""\
+#include <cstdlib>
+#include <format>
+#include <iostream>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 class File
 {
@@ -50,14 +78,22 @@ public:
     explicit File(const char *name) noexcept
         : name(name) {}
         
-    void add_line(const char *const line)
+    void add_text(const char *const text)
     {
-        lines.push_back(line);
+        if (!text_) [[likely]]
+        {
+            text_ = text;
+            return;
+        }
+        std::cerr << std::format(
+                    "{}:{} -> {}() Blackhole has a logic error. Tried reassigning `text` on file: {} ",
+                     __FILE__, __LINE__,  __func__, name) 
+                  << std::endl;
+        std::abort();
     }
     
 private:
-    // Note: we use `const char *` to save each line, as each line exists in this very file...
-    std::vector<const char *> lines; 
+    const char *text_ = nullptr;
 };
 
 class Directory
@@ -68,46 +104,181 @@ public:
     explicit Directory(const char *name) noexcept
         : name(name) {}
     
-    void add_subdir(Directory &&dir) 
+    void add_subdir(const Directory *const subdir) 
     {
-        dirs.push_back(std::move(dir));
+        dirs_.push_back(subdir);
     }
     
-    void add_file(File &&file)
+    void add_file(const File *const file)
     {
-        files.push_back(std::move(file));
+        files_.push_back(file);
     }
+    
+    const auto &files() const noexcept { return files_; }
+    const auto &dirs() const noexcept { return dirs_; }
 
 private:
     
-    std::vector<File> files;
-    std::vector<Directory> dirs;
+    std::vector<const File*> files_;
+    std::vector<const Directory*> dirs_;
 };
 """)
 
 
+def generate_loader_calls(root_dir: Directory) -> str:
+    def recurse(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            code_lines.append(f'\t{LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')  # generate loader calls
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(recurse(child_dir))
+        return code_lines
+
+    return ''.join(recurse(root_dir))
+
+
+def generate_main(root_dir: Directory) -> str:
+    return (
+        f'int main()\n'
+        f'{{\n'
+        f'{generate_loader_calls(root_dir)}'
+        f'\t// Reminded that dir_0  is always the root of the whole project...\n'
+        f'}}\n'
+    )
+
+
+def generate_cpp_reconstructor(root_dir: Directory) -> str:
+    return (
+        f'void reconstuctor(const Directory *const root_dir)\n'
+        f'{{\n'
+        f'\tnamespace fs = std::filesystem;\n'
+        f'\tfs::create_directory(root_dir->name);\n'
+        f'\tfs::current_path(root_dir->name);\n'
+        f'\tfor(const File* const file: root_dir->files())\n'
+        f'}}\n'
+    )
+
+
+def generate_directory_creation_code(root_dir: Directory) -> str:
+    def gen_code_dirs(parent_dir: Directory) -> List[str]:
+        parent_dir.mapped_code_id = gen_dir_id()
+        code_lines: List[str] = []
+        code_lines.append(f'Directory *const {parent_dir.mapped_code_id} = new Directory("{parent_dir.name}");\n')
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(gen_code_dirs(child_dir))
+        return code_lines
+
+    return ''.join(gen_code_dirs(root_dir))
+
+
+def generate_file_creation_code(root_dir: Directory) -> str:
+    def gen_code_files(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            file.mapped_code_id = gen_file_id()
+            code_lines.append(f'File *const {file.mapped_code_id} = new File("{file.name}");\n')
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(gen_code_files(child_dir))
+        return code_lines
+
+    return ''.join(gen_code_files(root_dir))
+
+
+def generate_directory_binding_code(root_dir: Directory) -> str:
+    def gen_bind_lines(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(gen_bind_lines(child_dir))
+            code_lines.append(f'{parent_dir.mapped_code_id}->add_subdir({child_dir.mapped_code_id});\n')
+        return code_lines
+
+    indented_lines = ['\t' + line for line in gen_bind_lines(root_dir)]
+
+    return (
+        f"{CppFunctionSignatures.DIR_BINDER}\n"
+        f"{{\n"
+        f"{''.join(indented_lines)}"
+        f"}}\n"
+    )
+
+
+def generate_file_binding_code(root_dir: Directory) -> str:
+    def gen_bind_lines(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            code_lines.append(f'{parent_dir.mapped_code_id}->add_file({file.mapped_code_id});\n')
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(gen_bind_lines(child_dir))
+        return code_lines
+
+    indented_lines = ['\t' + line for line in gen_bind_lines(root_dir)]
+
+    return (
+        f"{CppFunctionSignatures.FILE_BINDER}\n"
+        f"{{\n"
+        f"{''.join(indented_lines)}"
+        f"}}\n"
+    )
+
+
+def generate_all_file_loader_declarations(root_dir: Directory) -> str:
+    def gather_loader_declarations(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            code_lines.append(f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(gather_loader_declarations(child_dir))
+        return code_lines
+
+    return ''.join(line for line in gather_loader_declarations(root_dir))
+
+
+def generate_all_loader_definition_code(root_dir: Directory) -> str:
+    def emit_file_content_for_dir(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            delim = gen_rstr_delimiter(file)  # Each file gets its own.
+            code_lines.append(
+                f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}()\n'
+                f'{{\n'
+                f'{file.mapped_code_id}->add_text(R"{delim}({file.text}){delim}");\n'
+                f'}}\n'
+            )
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(emit_file_content_for_dir(child_dir))
+        return code_lines
+
+    return ''.join(line for line in emit_file_content_for_dir(root_dir))
+
 # Don't put everything inside main... Instead, put them as global objects: Fil1, file2, file3 and so on...
 # or inside DIR vector (each dir has files). But DIRS should be a single DIR and recursively build it.
 # Root to leafs (top to bottom).
-def generate_content(root_dir: Directory, fout: TextIO) -> None:
-    fout.write(
-        f'Directory *blackhole() // We return by value (utilizing copy elision)\n'
-        f'{{\n'
-        f'Directory * const root_dir = new Directory("{root_dir.name}");\n'
-    )
-
-    def recurse(root_dir: Directory) -> None:
-        for file in root_dir.files:
-            file_var_name = generate_raw_string_identifier(file)
-            delim = get_delimiter()
-            fout.write(f'File {file_var_name}("{file.name}");\n')
-            for line in file.lines:
-                fout.write(f'{file_var_name}.add_line(R"{delim}("{line}"){delim}");\n')
-
-        for child_dir in root_dir.dirs:
-            recurse(child_dir)
-            fout.write(f'root_dir->add_subdir("{child_dir.name}");\n')
-
-    recurse(root_dir)
-
-    fout.write(f'}}\n')
+# def generate_content(root_dir: Directory, fout: TextIO) -> None:
+#     fout.write(
+#         f'Directory *blackhole() // We return by value (utilizing copy elision)\n'
+#         f'{{\n'
+#     )
+#
+#     def recurse(root_dir: Directory) -> str:
+#         root_dir.mapped_code_id = gen_dir_id()
+#         fout.write(f'Directory * const {root_dir.mapped_code_id} = new Directory("{root_dir.name}");\n')
+#         for child_dir in root_dir.dirs:
+#             child_dir_id = recurse(child_dir)
+#             fout.write(f'{root_dir.mapped_code_id}->add_subdir({child_dir_id});\n')
+#
+#         for file in root_dir.files:
+#             file_id = gen_file_id()
+#             delim = gen_rstr_delimiter(file)  # Each file gets its own.
+#             fout.write(f'File *const {file_id} = new File("{file.name}");\n')
+#             # f'R"{delim}(\n'
+#             # f'{file.text}\n'
+#             # f'){delim}");\n')
+#             fout.write(f'{dir_id}->add_file({file_id});\n')
+#
+#         return dir_id
+#
+#     recurse(root_dir)
+#
+#     fout.write(f'}}\n')
+#
+#
