@@ -58,12 +58,12 @@ class Directory:
         assert self._mapped_code_id is None
         self._mapped_code_id = value
 
+
+LOADER_FUNC_PREFIX = "loader_"
+
 @dataclass(frozen=True)
 class CppFunctionSignatures:
     DIR_BINDER = "void bind_directories()"
     FILE_BINDER = "void bind_files_to_dirs()"
     FILE_LOADER = "void inject_file_contents()"
-
-
-LOADER_FUNC_PREFIX = "loader_"
-
+    RECONSTRUCTOR = "void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)"
