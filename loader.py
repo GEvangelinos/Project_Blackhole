@@ -13,30 +13,22 @@ def map_directory(dir_path: Path) -> Directory:
             if item.is_dir():
                 curr_dir.dirs.append(recurse(item))
             elif item.is_file():
+                if not os.access(item, os.R_OK):
+                    print(f"Skipping unreadable file: {item}")
+                    continue
+                try:
+                    with open(item, 'rb') as fin:  # read as bytes
+                        raw_bytes = fin.read()
+                        file_text = raw_bytes.decode('utf-8')  # decode manually
+                except UnicodeDecodeError:
+                    print(f"Skipping non-text (binary or non-UTF-8) file: {item}")
+                    continue
+
                 curr_file = File(item)
-                load_file(curr_file)
+                curr_file.text = file_text
                 curr_dir.files.append(curr_file)
             else:
                 print(f"Unknown type of directory item (NOT FILE, NOT DIR): {item}")
         return curr_dir
 
     return recurse(dir_path.resolve())
-
-
-def dir_printer(dir: Directory, depth: int = 0) -> None:
-    space_tab = 4 * ' '
-    indentation = depth * space_tab
-    print(f"{indentation}{'┣' if depth else ''}━{dir.name}")
-    indentation += space_tab
-    for file in dir.files:
-        print(f"{indentation}┣━{file.name}")
-    for child_dir in dir.dirs:
-        dir_printer(child_dir, depth=depth + 1)
-
-
-def load_file(file: File) -> None:
-    if not os.access(file.fullpath, os.R_OK):
-        raise PermissionError(f"File is not readable: {file.fullpath}")
-
-    with open(file.fullpath, 'r', encoding='utf-8') as fin:
-        file.lines = [line.removesuffix('\n') for line in fin]

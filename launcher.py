@@ -1,6 +1,6 @@
 import zipper
 from cli_parser import *
-from loader import map_directory, dir_printer
+from loader import map_directory
 
 
 def main():

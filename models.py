@@ -5,10 +5,8 @@ from debug_tools import attach_context
 
 
 class File:
-    lines: List[str]
-
     def __init__(self, fullpath: Path):
-        self.lines = []
+        self._text: Optional[str] = None
         self._mapped_code_id: Optional[str] = None
 
         if not fullpath.is_file():
@@ -20,8 +18,18 @@ class File:
         return self.fullpath.name
 
     @property
-    def text(self):
-        return '\n'.join(line for line in self.lines)
+    def text(self) -> str:
+        assert self._text is not None, f"Attempted to access `.text` before it was loaded for file: {self.fullpath}"
+        return self._text
+
+    @text.setter
+    def text(self, value: str) -> None:
+        assert self._text is None, f"Attempted to set `.text` twice for file: {self.fullpath}"
+        self._text = value
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._text is not None
 
     @property
     def mapped_code_id(self) -> str:
@@ -60,10 +68,14 @@ class Directory:
 
 
 LOADER_FUNC_PREFIX = "loader_"
+ROOT_CODE_DIR = "ROOT_DIR"
+DIR_BINDER_FUNCNAME = "bind_directories"
+FILE_BINDER_FUNCNAME = "bind_files_to_dirs"
+
 
 @dataclass(frozen=True)
 class CppFunctionSignatures:
-    DIR_BINDER = "void bind_directories()"
-    FILE_BINDER = "void bind_files_to_dirs()"
+    DIR_BINDER = f"void {DIR_BINDER_FUNCNAME}()"
+    FILE_BINDER = f"void {FILE_BINDER_FUNCNAME}()"
     FILE_LOADER = "void inject_file_contents()"
     RECONSTRUCTOR = "void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)"

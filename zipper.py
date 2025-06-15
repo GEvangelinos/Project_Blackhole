@@ -1,5 +1,5 @@
 import random
-from typing import TextIO, List
+from typing import TextIO
 from models import *
 from banner import BLACKHOLE_COMMENT_BANNER_WITH_WARNING
 
@@ -22,11 +22,10 @@ def gen_dir_id() -> str:
 
 
 def gen_rstr_delimiter(curr_file: File) -> str:
-    file_text = '\n'.join(line for line in curr_file.lines)
     while True:
         suffix = format(random.getrandbits(32), 'x')
         result = f"D_{suffix}"
-        if result not in file_text:
+        if result not in curr_file.text:
             return result
 
 
@@ -42,11 +41,10 @@ def close_output_file(fout: TextIO) -> None:
 def generate_raw_string_identifier(file: File) -> str:
     filename = file.name
     filename = filename.replace('.', "_DOT_")
-    file_text = '\n'.join(file.lines)
     while True:
         suffix = format(random.getrandbits(32), 'x')
         delimiter = f"{filename}_{suffix}"
-        if delimiter not in file_text:
+        if delimiter not in file.text:
             return delimiter
 
 
@@ -95,7 +93,7 @@ public:
         std::abort();
     }}
     
-    const char *text()
+    const char *text() const
     {{
         if (text_) [[likely]]
             return text_;
@@ -156,7 +154,10 @@ int main()
 {{
     // Reminded that dir_0  is always the root of the whole project...
 {generate_loader_calls(root_dir)}
-    reconstructor(dir_0, std::filesystem::current_path());
+    {DIR_BINDER_FUNCNAME}();
+    {FILE_BINDER_FUNCNAME}();
+    
+    reconstructor({ROOT_CODE_DIR}, std::filesystem::current_path());
 }}
 """)
 
@@ -190,6 +191,7 @@ def generate_cpp_reconstructor() -> str:
             continue;
         }}
         std::ofstream fout(filepath);
+        fout << file->text();
     }}
     
     for (const Directory *const child_dir : root_dir->dirs())
@@ -219,7 +221,7 @@ def generate_directory_creation_code(root_dir: Directory) -> str:
         return code_lines
 
     code_body = ''.join(gen_code_dirs(root_dir))
-    code_body += f'const Directory *const ROOT_DIR = {first_generated_dir_id};\n'
+    code_body += f'const Directory *const {ROOT_CODE_DIR} = {first_generated_dir_id};\n'
     return code_body
 
 
@@ -284,6 +286,8 @@ def generate_all_file_loader_declarations(root_dir: Directory) -> str:
     def gather_loader_declarations(parent_dir: Directory) -> List[str]:
         code_lines: List[str] = []
         for file in parent_dir.files:
+            if not file.is_loaded: # We don't load file that can not be represented in UTF-8 (like binary files)
+                continue
             code_lines.append(f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')
         for child_dir in parent_dir.dirs:
             code_lines.extend(gather_loader_declarations(child_dir))
@@ -296,6 +300,8 @@ def generate_all_loader_definition_code(root_dir: Directory) -> str:
     def emit_file_content_for_dir(parent_dir: Directory) -> List[str]:
         code_lines: List[str] = []
         for file in parent_dir.files:
+            if not file.is_loaded: # We don't load file that can not be represented in UTF-8 (like binary files)
+                continue
             delim = gen_rstr_delimiter(file)  # Each file gets its own.
             code_lines.append(
                 f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}()\n'
