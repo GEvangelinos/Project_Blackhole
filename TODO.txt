@@ -1,0 +1,5 @@
+1) Make possible to save binary files inside the .cpp file
+2) Maybe use base85 (you need a decoder in C++, python has a standard once (for encoding)
+3) Write an endianess test, you should save endianess of origin machine and find endianess
+ of target machine and based on that switch on the method you use to rewrite the binary file on
+ the target machine
