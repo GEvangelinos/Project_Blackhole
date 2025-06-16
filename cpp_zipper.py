@@ -25,7 +25,7 @@ def gen_rstr_delimiter(curr_file: File) -> str:
     while True:
         suffix = format(random.getrandbits(32), 'x')
         result = f"D_{suffix}"
-        if result not in curr_file.text:
+        if curr_file.is_binary or result not in curr_file.data:
             return result
 
 
@@ -35,17 +35,6 @@ def open_output_file(output_file_name: str) -> TextIO:
 
 def close_output_file(fout: TextIO) -> None:
     fout.close()
-
-
-# Returns the filename + a random suffix hex-number (guaranteed not to exist in file)
-def generate_raw_string_identifier(file: File) -> str:
-    filename = file.name
-    filename = filename.replace('.', "_DOT_")
-    while True:
-        suffix = format(random.getrandbits(32), 'x')
-        delimiter = f"{filename}_{suffix}"
-        if delimiter not in file.text:
-            return delimiter
 
 
 def generate_all(root_dir: Directory, fout: TextIO):
@@ -71,41 +60,52 @@ def generate_prologue() -> str:
 #include <string>
 #include <vector>
 #include <filesystem>
+ 
+std::filesystem::perms int_to_perms(int mode)
+{{
+        using perms = std::filesystem::perms;
+        
+        mode &= static_cast<int>(perms::mask); // Masking to keep only valid permissions.
+        return static_cast<perms>(mode);
+}}
+
 
 class File
 {{
 public:
     const char *const name;
+    const int perm_mode;
+    const bool is_binary;
     
-    explicit File(const char *name) noexcept
-        : name(name) {{}}
+    explicit File(const char *name, const int perm_mode, const bool is_binary) noexcept
+        : name(name), perm_mode(perm_mode), is_binary(is_binary){{}}
         
-    void add_text(const char *const text)
+    void attach_data(const char *const data)
     {{
-        if (!text_) [[likely]]
+        if (!data_) [[likely]]
         {{
-            text_ = text;
+            data_ = data;
             return;
         }}
         std::cerr << __FILE__ << ':' << __LINE__ << " -> " << __func__ << "(): "
-                  << "Blackhole has a logic error. Tried reassigning `text_` on file: " << this->name
+                  << "Blackhole has a logic error. Tried reassigning `data_` on file: " << this->name
                   << std::endl;
         std::abort();
     }}
     
-    const char *text() const
+    const char *data() const
     {{
-        if (text_) [[likely]]
-            return text_;
+        if (data_) [[likely]]
+            return data_;
         std::cerr << __FILE__ << ':' << __LINE__ << " -> " << __func__ << "(): "
-                  << "Blackhole has a logic error. Tried retrieving `text_` on file: " << this->name
+                  << "Blackhole has a logic error. Tried retrieving `data_` on file: " << this->name
                   << " --  but found nullptr"
                   << std::endl;
         std::abort();
     }}
     
 private:
-    const char *text_ = nullptr;
+    const char *data_ = nullptr;
 }};
 
 class Directory
@@ -133,72 +133,6 @@ private:
     std::vector<const File *> files_;
     std::vector<const Directory *> dirs_;
 }};
-""")
-
-
-def generate_loader_calls(root_dir: Directory) -> str:
-    def recurse(parent_dir: Directory) -> List[str]:
-        code_lines: List[str] = []
-        for file in parent_dir.files:
-            code_lines.append(f'\t{LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')  # generate loader calls
-        for child_dir in parent_dir.dirs:
-            code_lines.extend(recurse(child_dir))
-        return code_lines
-
-    return ''.join(recurse(root_dir))
-
-
-def generate_main(root_dir: Directory) -> str:
-    return (f"""
-int main()
-{{
-    // Reminded that dir_0  is always the root of the whole project...
-{generate_loader_calls(root_dir)}
-    {DIR_BINDER_FUNCNAME}();
-    {FILE_BINDER_FUNCNAME}();
-    
-    reconstructor({ROOT_CODE_DIR}, std::filesystem::current_path());
-}}
-""")
-
-
-def generate_cpp_reconstructor() -> str:
-    # Reconstructor singature:
-    # void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)
-    return (f"""\
-{CppFunctionSignatures.RECONSTRUCTOR}
-{{
-    namespace fs = std::filesystem;
-    const fs::path curr_dirpath = basepath / root_dir->name;
-    if (fs::exists(curr_dirpath))
-    {{
-        std::cerr << "Reconstruction error: In path "  << curr_dirpath.string()
-                  << " -- "
-                  << "directory: " << root_dir->name <<  " already exists"
-                  << std::endl;
-        return;
-    }}
-    fs::create_directory(curr_dirpath);
-    for (const File *const file : root_dir->files())
-    {{
-        fs::path filepath = curr_dirpath / file->name;
-        if (fs::exists(filepath))
-        {{
-            std::cerr << "Reconstruction error: In path " << curr_dirpath.string()
-                      << " -- "
-                      << "file: " << file->name  << " already exists"
-                      << std::endl;
-            continue;
-        }}
-        std::ofstream fout(filepath);
-        fout << file->text();
-    }}
-    
-    for (const Directory *const child_dir : root_dir->dirs())
-    {{
-        reconstructor(child_dir, curr_dirpath);
-    }}
-}}
 """)
 
 
@@ -230,7 +164,8 @@ def generate_file_creation_code(root_dir: Directory) -> str:
         code_lines: List[str] = []
         for file in parent_dir.files:
             file.mapped_code_id = gen_file_id()
-            code_lines.append(f'File *const {file.mapped_code_id} = new File("{file.name}");\n')
+            code_lines.append(
+                f'File *const {file.mapped_code_id} = new File("{file.name}", {file.permissions}, {str(file.is_binary).lower()});\n')
         for child_dir in parent_dir.dirs:
             code_lines.extend(gen_code_files(child_dir))
         return code_lines
@@ -286,7 +221,7 @@ def generate_all_file_loader_declarations(root_dir: Directory) -> str:
     def gather_loader_declarations(parent_dir: Directory) -> List[str]:
         code_lines: List[str] = []
         for file in parent_dir.files:
-            if not file.is_loaded: # We don't load file that can not be represented in UTF-8 (like binary files)
+            if not file.is_loaded:  # We don't load file that can not be represented in UTF-8 (like binary files)
                 continue
             code_lines.append(f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')
         for child_dir in parent_dir.dirs:
@@ -296,20 +231,98 @@ def generate_all_file_loader_declarations(root_dir: Directory) -> str:
     return ''.join(line for line in gather_loader_declarations(root_dir))
 
 
+def generate_main(root_dir: Directory) -> str:
+    return (f"""
+int main()
+{{
+    // Reminded that dir_0  is always the root of the whole project...
+{generate_loader_calls(root_dir)}
+    {DIR_BINDER_FUNCNAME}();
+    {FILE_BINDER_FUNCNAME}();
+    
+    reconstructor({ROOT_CODE_DIR}, std::filesystem::current_path());
+}}
+""")
+
+
+def generate_loader_calls(root_dir: Directory) -> str:
+    def recurse(parent_dir: Directory) -> List[str]:
+        code_lines: List[str] = []
+        for file in parent_dir.files:
+            code_lines.append(f'\t{LOADER_FUNC_PREFIX}{file.mapped_code_id}();\n')  # generate loader calls
+        for child_dir in parent_dir.dirs:
+            code_lines.extend(recurse(child_dir))
+        return code_lines
+
+    return ''.join(recurse(root_dir))
+
+
+def generate_cpp_reconstructor() -> str:
+    # Reconstructor singature:
+    # void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)
+    return (f"""\
+{CppFunctionSignatures.RECONSTRUCTOR}
+{{
+    namespace fs = std::filesystem;
+    const fs::path curr_dirpath = basepath / root_dir->name;
+    if (fs::exists(curr_dirpath))
+    {{
+        std::cerr << "Reconstruction error: In path "  << curr_dirpath.string()
+                  << " -- "
+                  << "directory: " << root_dir->name <<  " already exists"
+                  << std::endl;
+        return;
+    }}
+    fs::create_directory(curr_dirpath);
+    for (const File *const file : root_dir->files())
+    {{
+        fs::path filepath = curr_dirpath / file->name;
+        if (fs::exists(filepath))
+        {{
+            std::cerr << "Reconstruction error: In path " << curr_dirpath.string()
+                      << " -- "
+                      << "file: " << file->name  << " already exists"
+                      << std::endl;
+            continue;
+        }}
+        if (file->is_binary)
+        {{
+            std::ofstream fout(filepath, std::ios::binary);
+            fout << file->data();
+        }}
+        else
+        {{
+            std::ofstream fout(filepath);
+            fout << file->data();
+        }}
+        std::filesystem::permissions(filepath, int_to_perms(file->perm_mode), fs::perm_options::replace);
+    }}
+    
+    for (const Directory *const child_dir : root_dir->dirs())
+    {{
+        reconstructor(child_dir, curr_dirpath);
+    }}
+}}
+""")
+
+
 def generate_all_loader_definition_code(root_dir: Directory) -> str:
     def emit_file_content_for_dir(parent_dir: Directory) -> List[str]:
         code_lines: List[str] = []
         for file in parent_dir.files:
-            if not file.is_loaded: # We don't load file that can not be represented in UTF-8 (like binary files)
+            if not file.is_loaded:  # We don't load file that can not be represented in UTF-8 (like binary files)
                 continue
             delim = gen_rstr_delimiter(file)  # Each file gets its own.
             code_lines.append(
                 f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}()\n'
                 f'{{\n'
-                f'\t{file.mapped_code_id}->add_text(\n'
-                f'R"{delim}({file.text}){delim}");\n'
+                f'\t{file.mapped_code_id}->attach_data(\n'
+                f'R"{delim}({f"{''.join(f'{b:02x}' for b in file.data)}" if file.is_binary else file.data}){delim}");\n'
                 f'}}\n'
             )
+            # x = fin.read()
+            # for byte in x:
+            #     print(f"{byte:b}", end='')
         for child_dir in parent_dir.dirs:
             code_lines.extend(emit_file_content_for_dir(child_dir))
         return code_lines

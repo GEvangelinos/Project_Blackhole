@@ -12,23 +12,31 @@ def map_directory(dir_path: Path) -> Directory:
         for item in fullpath.iterdir():
             if item.is_dir():
                 curr_dir.dirs.append(recurse(item))
-            elif item.is_file():
-                if not os.access(item, os.R_OK):
-                    print(f"Skipping unreadable file: {item}")
-                    continue
-                try:
-                    with open(item, 'rb') as fin:  # read as bytes
-                        raw_bytes = fin.read()
-                        file_text = raw_bytes.decode('utf-8')  # decode manually
-                except UnicodeDecodeError:
-                    print(f"Skipping non-text (binary or non-UTF-8) file: {item}")
-                    continue
-
-                curr_file = File(item)
-                curr_file.text = file_text
-                curr_dir.files.append(curr_file)
-            else:
+                continue
+            if not item.is_file():
                 print(f"Unknown type of directory item (NOT FILE, NOT DIR): {item}")
+                continue
+            if not os.access(item, os.R_OK):
+                print(f"Skipping unreadable file: {item}")
+                continue
+            permissions = item.stat().st_mode & 0o777  # we extract the file permissions
+            curr_file = File(item, permissions)
+            curr_file.data = read_file_data(item)
+            curr_file.is_binary = isinstance(curr_file.data, bytes)
+            if curr_file.is_loaded:
+                curr_dir.files.append(curr_file)
         return curr_dir
+
+    def read_file_data(item: Path) -> Optional[Union[str, bytes]]:
+        try:
+            with open(item, 'r', encoding='utf-8') as fin:
+                return fin.read()
+        except (UnicodeDecodeError, OSError):
+            try:
+                with (open(item, 'rb') as fin):
+                    return fin.read()
+            except OSError:
+                print(f"Skipping file: {item} (Could not read neither as utf-8 nor raw_bytes)")
+        return None
 
     return recurse(dir_path.resolve())

@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 from debug_tools import attach_context
 
 
 class File:
-    def __init__(self, fullpath: Path):
-        self._text: Optional[str] = None
+    def __init__(self, fullpath: Path, permissions: int):
         self._mapped_code_id: Optional[str] = None
+        self._data: Optional[Union[str, bytes]] = None
+        self._is_binary: Optional[bool] = None
+        self._permissions = permissions
 
         if not fullpath.is_file():
             raise ValueError(attach_context(f"Fullpath: {fullpath} does not correspond to a file"))
@@ -18,18 +20,34 @@ class File:
         return self.fullpath.name
 
     @property
-    def text(self) -> str:
-        assert self._text is not None, f"Attempted to access `.text` before it was loaded for file: {self.fullpath}"
-        return self._text
+    def permissions(self):
+        return self._permissions
 
-    @text.setter
-    def text(self, value: str) -> None:
-        assert self._text is None, f"Attempted to set `.text` twice for file: {self.fullpath}"
-        self._text = value
+    @property
+    def data(self) -> str:
+        assert self._data is not None, f"Attempted to access `self._data` before it was loaded for file: {self.fullpath}"
+        return self._data
+
+    @data.setter
+    def data(self, value: Optional[Union[str, bytes]]) -> None:
+        if value is None:
+            return
+        assert self._data is None, f"Attempted to set `self._data` but its already loaded. For file: {self.fullpath}"
+        self._data = value
 
     @property
     def is_loaded(self) -> bool:
-        return self._text is not None
+        return self._data is not None
+
+    @property
+    def is_binary(self) -> bool:
+        assert self._is_binary is not None, f"Attempted to access `self._is_binary` but it was never specified. For file: {self.fullpath}"
+        return self._is_binary
+
+    @is_binary.setter
+    def is_binary(self, value: bool) -> None:
+        assert self._is_binary is None, f"Attempted to set `self._is_binary` but it already set. For file: {self.fullpath}"
+        self._is_binary = value
 
     @property
     def mapped_code_id(self) -> str:
