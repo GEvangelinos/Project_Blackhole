@@ -1,4 +1,6 @@
 from enum import Enum, auto
+
+import banner
 from debug_tools import attach_context
 
 
@@ -71,6 +73,11 @@ class Progress:
         else:
             raise ValueError(attach_context(f"Stage {self.stage} not found in Progress.Stage"))
         return total
+
+    @staticmethod
+    def init_banner_grid():
+        return [[ch for ch in line] for line in banner.PROGRESS_BANNER.splitlines()]
+
 
     def show_progress_banner(self):
         pass
