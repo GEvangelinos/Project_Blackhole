@@ -24,8 +24,8 @@ def gen_dir_id() -> str:
 def gen_rstr_delimiter(curr_file: File) -> str:
     while True:
         suffix = format(random.getrandbits(32), 'x')
-        result = f"D_{suffix}"
-        if curr_file.is_binary or result not in curr_file.data:
+        result = f"FILE_{suffix}"
+        if result not in curr_file.data:
             return result
 
 
@@ -38,7 +38,7 @@ def close_output_file(fout: TextIO) -> None:
 
 
 def generate_all(root_dir: Directory, fout: TextIO):
-    fout.write(generate_prologue())
+    fout.write(generate_support_system())
     fout.write(generate_directory_creation_code(root_dir))
     fout.write(generate_file_creation_code(root_dir))
     fout.write(generate_directory_binding_code(root_dir))
@@ -49,7 +49,7 @@ def generate_all(root_dir: Directory, fout: TextIO):
     fout.write(generate_all_loader_definition_code(root_dir))
 
 
-def generate_prologue() -> str:
+def generate_support_system() -> str:
     return (f"""\
 {BLACKHOLE_COMMENT_BANNER_WITH_WARNING}
 
@@ -165,7 +165,7 @@ def generate_file_creation_code(root_dir: Directory) -> str:
         for file in parent_dir.files:
             file.mapped_code_id = gen_file_id()
             code_lines.append(
-                f'File *const {file.mapped_code_id} = new File("{file.name}", {file.permissions}, {str(file.is_binary).lower()});\n')
+                f'File *const {file.mapped_code_id} = new File("{file.name}", {file.permissions}, {str(file.is_encoded_ascii85).lower()});\n')
         for child_dir in parent_dir.dirs:
             code_lines.extend(gen_code_files(child_dir))
         return code_lines
@@ -317,7 +317,7 @@ def generate_all_loader_definition_code(root_dir: Directory) -> str:
                 f'void {LOADER_FUNC_PREFIX}{file.mapped_code_id}()\n'
                 f'{{\n'
                 f'\t{file.mapped_code_id}->attach_data(\n'
-                f'R"{delim}({f"{''.join(f'{b:02x}' for b in file.data)}" if file.is_binary else file.data}){delim}");\n'
+                f'R"{delim}({file.data}){delim}");\n'
                 f'}}\n'
             )
             # x = fin.read()

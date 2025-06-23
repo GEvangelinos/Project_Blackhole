@@ -8,7 +8,7 @@ class File:
     def __init__(self, fullpath: Path, permissions: int):
         self._mapped_code_id: Optional[str] = None
         self._data: Optional[Union[str, bytes]] = None
-        self._is_binary: Optional[bool] = None
+        self._is_encoded_ascii85: Optional[bool] = None
         self._permissions = permissions
 
         if not fullpath.is_file():
@@ -40,14 +40,14 @@ class File:
         return self._data is not None
 
     @property
-    def is_binary(self) -> bool:
-        assert self._is_binary is not None, f"Attempted to access `self._is_binary` but it was never specified. For file: {self.fullpath}"
-        return self._is_binary
+    def is_encoded_ascii85(self) -> bool:
+        assert self._is_encoded_ascii85 is not None, f"Attempted to access `self._is_encoded_ascii85` but it was never specified. For file: {self.fullpath}"
+        return self._is_encoded_ascii85
 
-    @is_binary.setter
-    def is_binary(self, value: bool) -> None:
-        assert self._is_binary is None, f"Attempted to set `self._is_binary` but it already set. For file: {self.fullpath}"
-        self._is_binary = value
+    @is_encoded_ascii85.setter
+    def is_encoded_ascii85(self, value: bool) -> None:
+        assert self._is_encoded_ascii85 is None, f"Attempted to set `self._is_encoded_ascii85` but it already set. For file: {self.fullpath}"
+        self._is_encoded_ascii85 = value
 
     @property
     def mapped_code_id(self) -> str:
