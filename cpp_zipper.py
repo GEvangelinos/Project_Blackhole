@@ -2,6 +2,7 @@ import random
 from typing import TextIO
 from models import *
 from banner import BLACKHOLE_COMMENT_BANNER_WITH_WARNING
+from progress import *
 
 _file_count: int = 0
 _dir_count: int = 0
@@ -36,17 +37,29 @@ def open_output_file(output_file_name: str) -> TextIO:
 def close_output_file(fout: TextIO) -> None:
     fout.close()
 
+    # EXPORT_DIRECTORY_SKELETON = auto()
+    # EXPORT_BINDING_CODE = auto()
+    # EXPORT_FILE_CONTENT = auto()
 
-def generate_all(root_dir: Directory, fout: TextIO):
+
+def generate_all(root_dir: Directory, expected_files: int, fout: TextIO):
+    progress.stage = Progress.Stage.EXPORT_SUPPORT_SYSTEM
     fout.write(generate_support_system())
+
+    progress.stage = Progress.Stage.EXPORT_DIRECTORY_SKELETON
     fout.write(generate_directory_creation_code(root_dir))
     fout.write(generate_file_creation_code(root_dir))
+
+    progress.stage = Progress.Stage.EXPORT_BINDING_CODE
     fout.write(generate_directory_binding_code(root_dir))
     fout.write(generate_file_binding_code(root_dir))
+
     fout.write(generate_all_declarations(root_dir))
     fout.write(generate_main(root_dir))
     fout.write(generate_cpp_reconstructor())
-    fout.write(generate_all_loader_definition_code(root_dir))
+
+    progress.stage = Progress.Stage.EXPORT_FILE_CONTENT
+    fout.write(generate_all_loader_definition_code(root_dir, expected_files))
 
 
 def generate_support_system() -> str:
@@ -306,11 +319,14 @@ def generate_cpp_reconstructor() -> str:
 """)
 
 
-def generate_all_loader_definition_code(root_dir: Directory) -> str:
+def generate_all_loader_definition_code(root_dir: Directory, expected_files: int) -> str:
+    generated_definitions = 0
+
     def emit_file_content_for_dir(parent_dir: Directory) -> List[str]:
+        nonlocal generated_definitions
         code_lines: List[str] = []
         for file in parent_dir.files:
-            if not file.is_loaded:  # We don't load file that can not be represented in UTF-8 (like binary files)
+            if not file.is_loaded:
                 continue
             delim = gen_rstr_delimiter(file)  # Each file gets its own.
             code_lines.append(
@@ -320,9 +336,8 @@ def generate_all_loader_definition_code(root_dir: Directory) -> str:
                 f'R"{delim}({file.data}){delim}");\n'
                 f'}}\n'
             )
-            # x = fin.read()
-            # for byte in x:
-            #     print(f"{byte:b}", end='')
+            generated_definitions += 1
+            progress.stage_progress = generated_definitions / expected_files
         for child_dir in parent_dir.dirs:
             code_lines.extend(emit_file_content_for_dir(child_dir))
         return code_lines
