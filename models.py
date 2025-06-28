@@ -97,3 +97,4 @@ class CppFunctionSignatures:
     FILE_BINDER = f"void {FILE_BINDER_FUNCNAME}()"
     FILE_LOADER = "void inject_file_contents()"
     RECONSTRUCTOR = "void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)"
+    DECODER = "auto decode_ascii85(const char *const encoded_data)"
