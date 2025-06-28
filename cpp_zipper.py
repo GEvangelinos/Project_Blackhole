@@ -37,10 +37,6 @@ def open_output_file(output_file_name: str) -> TextIO:
 def close_output_file(fout: TextIO) -> None:
     fout.close()
 
-    # EXPORT_DIRECTORY_SKELETON = auto()
-    # EXPORT_BINDING_CODE = auto()
-    # EXPORT_FILE_CONTENT = auto()
-
 
 def generate_all(root_dir: Directory, expected_files: int, fout: TextIO):
     progress.stage = Progress.Stage.EXPORT_SUPPORT_SYSTEM
@@ -88,10 +84,10 @@ class File
 public:
     const char *const name;
     const int perm_mode;
-    const bool is_binary;
+    const bool is_encoded;
     
-    explicit File(const char *name, const int perm_mode, const bool is_binary) noexcept
-        : name(name), perm_mode(perm_mode), is_binary(is_binary){{}}
+    explicit File(const char *name, const int perm_mode, const bool is_encoded) noexcept
+        : name(name), perm_mode(perm_mode), is_encoded(is_encoded){{}}
         
     void attach_data(const char *const data)
     {{
@@ -270,8 +266,52 @@ def generate_loader_calls(root_dir: Directory) -> str:
     return ''.join(recurse(root_dir))
 
 
+def generate_ascii85_decoder() -> str:
+    from binary_encoder import BYTES_PER_BLOCK, CHARS_PER_BLOCK, BASE, ASCII_OFFSET
+    return (f"""\
+#include <cstring>
+#include <cstdint>
+#include <vector>
+
+auto decode_ascii85(const char *const encoded_data)
+{{
+    auto base = {BASE};
+    auto ascii_offset = {ASCII_OFFSET};
+    auto chars_per_block = {CHARS_PER_BLOCK};
+    auto bytes_per_block = {BYTES_PER_BLOCK};
+    auto data_size = std::strlen(encoded_data);
+    std::vector<std::uint8_t> binary_data;
+    
+    // Decode full byte-blocks.
+    int i = 0;
+    for (; i < data_size; i += chars_per_block)
+    {{
+        // Convert ascii85 char block to representing integer.
+        std::uint32_t value = 0;
+        for (int j = 0; j < chars_per_block; j++)
+            value = value * base + (encoded_data[i + j] - ascii_offset);
+            
+        binary_data.push_back((value >> 24) & 0xFF);
+        binary_data.push_back((value >> 16) & 0xFF);
+        binary_data.push_back((value >> 8 ) & 0xFF);
+        binary_data.push_back((value      ) & 0xFF);
+    }}
+    
+    // Decode partial byte-blocks.
+    std::uint32_t value = 0;
+    i = i - chars_per_blocks + 1 // This is the location a after last used ascii85 char.
+    for (int j = 0; j < data_size % chars_per_block; j++)
+        value = value * base + (encoded_data[i + j] - ascii_offset);
+    
+    
+    return binary_data
+}}
+""")
+
+
+
 def generate_cpp_reconstructor() -> str:
-    # Reconstructor singature:
+    # Reconstructor signature:
     # void reconstructor(const Directory *const root_dir, const std::filesystem::path basepath)
     return (f"""\
 {CppFunctionSignatures.RECONSTRUCTOR}
@@ -298,7 +338,7 @@ def generate_cpp_reconstructor() -> str:
                       << std::endl;
             continue;
         }}
-        if (file->is_binary)
+        if (file->is_encoded)
         {{
             std::ofstream fout(filepath, std::ios::binary);
             fout << file->data();

@@ -1,10 +1,11 @@
-def encode_ascii85(data: bytes) -> str:
-    BASE = 85
-    ASCII_OFFSET = 33
-    BYTES_PER_BLOCK = 4
-    CHARS_PER_BLOCK = 5
-    BITS_PER_BYTE = 8
+BASE = 85
+ASCII_OFFSET = 33
+BYTES_PER_BLOCK = 4
+CHARS_PER_BLOCK = 5
+BITS_PER_BYTE = 8
 
+
+def encode_ascii85(data: bytes) -> str:
     partial_block_bytes = len(data) % BYTES_PER_BLOCK
     byte_block_size = BYTES_PER_BLOCK
 
