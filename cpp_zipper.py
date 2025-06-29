@@ -289,39 +289,47 @@ auto decode_ascii85(const char *const encoded_data)
     auto data_size = std::strlen(encoded_data);
     std::vector<char> binary_data;
     
-    // TODO: REMOVE (debug print)    
-    std::cout << "(((" << encoded_data << ")))" << std::endl;
-    std::cout << "STRLEN == " << data_size << std::endl;
-    
     decltype(data_size) i = 0;
-    auto last_full_block_start = data_size - chars_per_block;
-    for (; i < last_full_block_start; i += chars_per_block) 
+    auto last_full_block_end = data_size - data_size % chars_per_block;
+    for (; i < last_full_block_end; i += chars_per_block) 
     {{
         // Convert ascii85 char block to representing integer.
         std::uint32_t value = 0;
-        for (int j = 0; j < chars_per_block; j++)
+        for (int j = 0; j < chars_per_block; ++j)
             value = value * base + (encoded_data[i + j] - ascii_offset);
             
         // Loop over each byte in the block in reverse order.
         // Since array indices start at 0, the last byte is at (bytes_per_block - 1).
         // This gives reverse order: e.g., for 4 bytes, j goes 3, 2, 1, 0.
-        for (int j = bytes_per_block - 1; j >= 0; j--)
+        for (int j = bytes_per_block - 1; j >= 0; --j)
             binary_data.push_back((value >> bits_per_bytes * j) & 0xFF);
     }}
     
     // Decode last, partial, byte-block.
     std::uint32_t value = 0;
-    auto char_byte_expansion = chars_per_block - bytes_per_block;
     auto remaining_encoded_chars = data_size % chars_per_block;
-    auto remaining_undecoded_bytes = remaining_encoded_chars - char_byte_expansion;
-    if (remaining_undecoded_bytes > 0)
+    if (remaining_encoded_chars > 0)
     {{
-        for (int j = 0; j < remaining_encoded_chars; j++)
-            value = value * base + (encoded_data[i + j] - ascii_offset);
-        for (int j = remaining_undecoded_bytes - 1; j >= 0; j--) // We do - 1 cause we want to use j as index.
-            binary_data.push_back((value >> bits_per_bytes * j) & 0xFF);
+        for (int j = 0; j < chars_per_block; ++j)
+        {{
+            std::cout << "ENCODED_DATA: " << encoded_data[i+j] << std::endl;
+            if (j < remaining_encoded_chars)
+                value = value * base + (encoded_data[i + j] - ascii_offset);
+            else
+                value = value * base + (base - 1); // I thought it was value = value * base, but apparently + 84  (on ascii85) solves decoding offset errors...
+        }}
+
+        int bytes_to_extract = (remaining_encoded_chars * bytes_per_block) / chars_per_block;
+        std::cout << "BYTES_TO_EXTRACT: " << bytes_to_extract << '\t';
+
+        for (int j = 0; j < bytes_to_extract; ++j)
+        {{
+            int shift = bits_per_bytes * (bytes_per_block - j - 1);
+            std::cout << "VALUE == " << value << '\t';
+            std::cout << "SHIFT == " << shift << std::endl;
+            binary_data.push_back((value >> shift) & 0xFF);
+        }}
     }}
-    
     return binary_data;
 }}
 """)
