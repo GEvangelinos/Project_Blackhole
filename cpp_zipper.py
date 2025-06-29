@@ -269,12 +269,17 @@ def generate_loader_calls(root_dir: Directory) -> str:
 
 def generate_ascii85_decoder() -> str:
     from binary_encoder import BYTES_PER_BLOCK, CHARS_PER_BLOCK, BASE, ASCII_OFFSET, BITS_PER_BYTE
+    assert CHARS_PER_BLOCK > BYTES_PER_BLOCK, (
+        "CHARS_PER_BLOCK must be greater than BYTES_PER_BLOCK for ASCII85 decoding to work correctly. "
+        "This assertion helps catch misconfigurations or logic errors."
+    )
     return (f"""\
 #include <cstring>
 #include <cstdint>
 #include <vector>
+#include <iostream>
 
-{CppFunctionSignatures.DECODER}
+auto decode_ascii85(const char *const encoded_data)
 {{
     auto base = {BASE};
     auto bits_per_bytes = {BITS_PER_BYTE};
@@ -282,29 +287,42 @@ def generate_ascii85_decoder() -> str:
     auto chars_per_block = {CHARS_PER_BLOCK};
     auto bytes_per_block = {BYTES_PER_BLOCK};
     auto data_size = std::strlen(encoded_data);
-    std::vector<std::uint8_t> binary_data;
+    std::vector<char> binary_data;
     
-    // Decode full byte-blocks.
-    int i = 0;
-    for (; i < data_size; i += chars_per_block)
+    // TODO: REMOVE (debug print)    
+    std::cout << "(((" << encoded_data << ")))" << std::endl;
+    std::cout << "STRLEN == " << data_size << std::endl;
+    
+    decltype(data_size) i = 0;
+    auto last_full_block_start = data_size - chars_per_block;
+    for (; i < last_full_block_start; i += chars_per_block) 
     {{
         // Convert ascii85 char block to representing integer.
         std::uint32_t value = 0;
         for (int j = 0; j < chars_per_block; j++)
             value = value * base + (encoded_data[i + j] - ascii_offset);
-        for (int j = bytes_per_block; j >= 0; j--)
+            
+        // Loop over each byte in the block in reverse order.
+        // Since array indices start at 0, the last byte is at (bytes_per_block - 1).
+        // This gives reverse order: e.g., for 4 bytes, j goes 3, 2, 1, 0.
+        for (int j = bytes_per_block - 1; j >= 0; j--)
             binary_data.push_back((value >> bits_per_bytes * j) & 0xFF);
     }}
     
-    // Decode partial byte-blocks.
+    // Decode last, partial, byte-block.
     std::uint32_t value = 0;
-    i = i - chars_per_block + 1; // This is the location a after last used ascii85 char.
-    for (int j = 0; j < data_size % chars_per_block; j--)
-        value = value * base + (encoded_data[i + j] - ascii_offset);
-    for (int j = data_size % chars_per_block - (chars_per_block - bytes_per_block); j >= 0; j++)
-        binary_data.push_back((value >> bits_per_bytes * j) & 0xFF);
+    auto char_byte_expansion = chars_per_block - bytes_per_block;
+    auto remaining_encoded_chars = data_size % chars_per_block;
+    auto remaining_undecoded_bytes = remaining_encoded_chars - char_byte_expansion;
+    if (remaining_undecoded_bytes > 0)
+    {{
+        for (int j = 0; j < remaining_encoded_chars; j++)
+            value = value * base + (encoded_data[i + j] - ascii_offset);
+        for (int j = remaining_undecoded_bytes - 1; j >= 0; j--) // We do - 1 cause we want to use j as index.
+            binary_data.push_back((value >> bits_per_bytes * j) & 0xFF);
+    }}
     
-    return binary_data
+    return binary_data;
 }}
 """)
 
@@ -342,8 +360,8 @@ def generate_cpp_reconstructor() -> str:
             std::ofstream fout(filepath, std::ios::binary);
             
             // Decode data from ascii85 to binary.
-            auto binary_data = decode_ascii85(file->data());
-            fout.write(
+            auto data_vector = decode_ascii85(file->data());
+            fout.write(data_vector.data(), data_vector.size());
         }}
         else
         {{
