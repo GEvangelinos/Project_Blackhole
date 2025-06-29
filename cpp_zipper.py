@@ -277,7 +277,6 @@ def generate_ascii85_decoder() -> str:
 #include <cstring>
 #include <cstdint>
 #include <vector>
-#include <iostream>
 
 auto decode_ascii85(const char *const encoded_data)
 {{
@@ -312,7 +311,6 @@ auto decode_ascii85(const char *const encoded_data)
     {{
         for (int j = 0; j < chars_per_block; ++j)
         {{
-            std::cout << "ENCODED_DATA: " << encoded_data[i+j] << std::endl;
             if (j < remaining_encoded_chars)
                 value = value * base + (encoded_data[i + j] - ascii_offset);
             else
@@ -320,13 +318,10 @@ auto decode_ascii85(const char *const encoded_data)
         }}
 
         int bytes_to_extract = (remaining_encoded_chars * bytes_per_block) / chars_per_block;
-        std::cout << "BYTES_TO_EXTRACT: " << bytes_to_extract << '\t';
 
         for (int j = 0; j < bytes_to_extract; ++j)
         {{
             int shift = bits_per_bytes * (bytes_per_block - j - 1);
-            std::cout << "VALUE == " << value << '\t';
-            std::cout << "SHIFT == " << shift << std::endl;
             binary_data.push_back((value >> shift) & 0xFF);
         }}
     }}
