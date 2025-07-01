@@ -1,5 +1,3 @@
-from Tools.scripts.var_access_benchmark import read_deque
-
 import cpp_zipper
 import file_handler
 from cli_parser import *

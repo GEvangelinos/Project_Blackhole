@@ -31,7 +31,7 @@ def gen_rstr_delimiter(curr_file: File) -> str:
 
 
 def open_output_file(output_file_name: str) -> TextIO:
-    return open(f"{output_file_name}.cpp", 'w')
+    return open(f"{output_file_name}.blk.cpp", 'w')
 
 
 def close_output_file(fout: TextIO) -> None:
@@ -64,7 +64,6 @@ def generate_support_system() -> str:
 {BLACKHOLE_COMMENT_BANNER_WITH_WARNING}
 
 #include <cstdlib>
-#include <format>
 #include <iostream>
 #include <fstream>
 #include <string>
